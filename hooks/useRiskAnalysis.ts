@@ -1,44 +1,125 @@
-// Risk analizi hook'u - loading ve hata durumlarını yönetir
-// Risk endpoint'i yavaş olduğu için (Wiro AI + cold start) loading uzun sürebilir.
-import { useState, useCallback } from "react";
+// Risk analizi hook'u - konuma göre önbellekli, sekmeler arası kalıcı
+import { useState, useCallback, useRef } from "react";
 import { api } from "../services/api";
+import { distanceMeters } from "../utils/geo";
 import type { RiskResponse } from "../types/api";
+
+/** Aynı konum sayılması için tolerans (metre) */
+const LOCATION_TOLERANCE_M = 200;
+
+interface CachedRisk {
+  lat: number;
+  lng: number;
+  data: RiskResponse;
+}
+
+interface CachedRiskError {
+  lat: number;
+  lng: number;
+  message: string;
+}
+
+// Sekme değişince bile korunur (MainTabs seviyesinde tutulur)
+let cachedRisk: CachedRisk | null = null;
+let cachedError: CachedRiskError | null = null;
+
+function isSameLocation(
+  lat: number,
+  lng: number,
+  cached: { lat: number; lng: number }
+): boolean {
+  return distanceMeters({ lat, lng }, cached) <= LOCATION_TOLERANCE_M;
+}
+
+/** RiskScreen ilk render'da önbelleği gösterebilsin diye dışa açık okuyucu */
+export function getCachedRiskForLocation(
+  lat: number,
+  lng: number
+): RiskResponse | null {
+  if (cachedRisk && isSameLocation(lat, lng, cachedRisk)) {
+    return cachedRisk.data;
+  }
+  return null;
+}
+
+export function getCachedRiskErrorForLocation(
+  lat: number,
+  lng: number
+): string | null {
+  if (cachedError && isSameLocation(lat, lng, cachedError)) {
+    return cachedError.message;
+  }
+  return null;
+}
 
 interface UseRiskAnalysisResult {
   data: RiskResponse | null;
   loading: boolean;
   error: string | null;
-  analyze: (lat: number, lng: number) => Promise<void>;
+  /** Önbellekte yoksa analiz yapar; aynı konumda tekrar istek atmaz */
+  analyzeIfNeeded: (lat: number, lng: number) => Promise<void>;
+  /** Her zaman yeni analiz ister */
+  refresh: (lat: number, lng: number) => Promise<void>;
 }
 
 export function useRiskAnalysis(): UseRiskAnalysisResult {
   const [data, setData] = useState<RiskResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
 
-  // Verilen koordinat için risk skorunu backend'den ister
-  const analyze = useCallback(async (lat: number, lng: number) => {
+  const runAnalysis = useCallback(async (lat: number, lng: number, force: boolean) => {
+    if (!force && cachedRisk && isSameLocation(lat, lng, cachedRisk)) {
+      setData(cachedRisk.data);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!force && cachedError && isSameLocation(lat, lng, cachedError)) {
+      setData(null);
+      setError(cachedError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
+
     try {
       const result = await api.getRisk({ lat, lng });
+      cachedRisk = { lat, lng, data: result };
+      cachedError = null;
       setData(result);
     } catch (e) {
-      const raw = e instanceof Error ? e.message : "";
-      setError(cleanRiskError(raw));
+      const message = cleanRiskError(e instanceof Error ? e.message : "");
+      cachedError = { lat, lng, message };
+      cachedRisk = null;
+      setData(null);
+      setError(message);
     } finally {
       setLoading(false);
+      inFlightRef.current = false;
     }
   }, []);
 
-  return { data, loading, error, analyze };
+  const analyzeIfNeeded = useCallback(
+    (lat: number, lng: number) => runAnalysis(lat, lng, false),
+    [runAnalysis]
+  );
+
+  const refresh = useCallback(
+    (lat: number, lng: number) => runAnalysis(lat, lng, true),
+    [runAnalysis]
+  );
+
+  return { data, loading, error, analyzeIfNeeded, refresh };
 }
 
-// Backend bazen AI'ın ham (bozuk JSON) çıktısını uzun bir hata mesajı olarak döner.
-// Kullanıcıya devasa ham metin göstermemek için kısa ve anlaşılır mesaja çeviririz.
 function cleanRiskError(raw: string): string {
   if (!raw) return "Bilinmeyen bir hata oluştu.";
-  // AI çözümleme/parse hataları ya da aşırı uzun teknik mesajlar
   if (
     raw.includes("çözümlenemedi") ||
     raw.includes("ham:") ||

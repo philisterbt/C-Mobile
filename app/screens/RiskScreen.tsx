@@ -1,6 +1,6 @@
 // Risk skoru ekranı - kullanıcının bulunduğu konumun deprem enkaz risk skorunu gösterir
-// Backend (Wiro AI) yavaş olduğu için analiz ~15-60 sn sürebilir; net loading gösterilir.
-import React, { useEffect, useCallback } from "react";
+// Analiz MainTabs seviyesinde önbelleklenir; sekmeye tekrar girince yeniden istek atılmaz.
+import React from "react";
 import {
   View,
   Text,
@@ -17,47 +17,61 @@ import { Card } from "../../components/Card";
 import { RiskBadge } from "../../components/RiskBadge";
 import { ErrorState } from "../../components/ErrorState";
 import { PrimaryButton } from "../../components/PrimaryButton";
-import { useLocation } from "../../hooks/useLocation";
-import { useRiskAnalysis } from "../../hooks/useRiskAnalysis";
-import type { RiskLevel } from "../../types/api";
+import {
+  getCachedRiskForLocation,
+  getCachedRiskErrorForLocation,
+} from "../../hooks/useRiskAnalysis";
+import type { Coordinate } from "../../hooks/useLocation";
+import type { RiskLevel, RiskResponse } from "../../types/api";
+
+interface RiskAnalysisState {
+  data: RiskResponse | null;
+  loading: boolean;
+  error: string | null;
+  refresh: (lat: number, lng: number) => Promise<void>;
+}
 
 interface RiskScreenProps {
-  // Geri butonu - yalnızca sekme dışı kullanımda verilir
+  location: Coordinate;
+  isDefault: boolean;
+  locationLoading: boolean;
+  risk: RiskAnalysisState;
   onBack?: () => void;
 }
 
-// Risk seviyesine göre skor halkasının rengi
 const LEVEL_COLOR: Record<RiskLevel, string> = {
   DÜŞÜK: Colors.SAFE,
   ORTA: Colors.WARNING,
   YÜKSEK: Colors.PRIMARY,
 };
 
-export function RiskScreen({ onBack }: RiskScreenProps) {
-  const { location, isDefault, loading: locationLoading } = useLocation();
-  const { data: risk, loading, error, analyze } = useRiskAnalysis();
+export function RiskScreen({
+  location,
+  isDefault,
+  locationLoading,
+  risk,
+  onBack,
+}: RiskScreenProps) {
+  const cachedResult =
+    risk.data ?? getCachedRiskForLocation(location.lat, location.lng);
+  const cachedError =
+    risk.error ?? getCachedRiskErrorForLocation(location.lat, location.lng);
 
-  // Konum hazır olunca risk analizini başlat
-  const runAnalysis = useCallback(() => {
-    analyze(location.lat, location.lng);
-  }, [analyze, location]);
+  const showLoading =
+    (risk.loading || locationLoading) && !cachedResult && !cachedError;
 
-  useEffect(() => {
-    if (!locationLoading) {
-      runAnalysis();
-    }
-    // location hazır olduğunda yalnızca bir kez tetiklensin
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationLoading]);
+  const handleRefresh = () => {
+    risk.refresh(location.lat, location.lng);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.BACKGROUND} />
       <Header title="Risk Skoru" onBack={onBack} />
 
-      {error ? (
-        <ErrorState message={error} onRetry={runAnalysis} />
-      ) : loading || locationLoading || !risk ? (
+      {cachedError && !cachedResult && !risk.loading ? (
+        <ErrorState message={cachedError} onRetry={handleRefresh} />
+      ) : showLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={Colors.PRIMARY} size="large" />
           <Text style={styles.loadingText}>Risk analizi yapılıyor...</Text>
@@ -65,37 +79,34 @@ export function RiskScreen({ onBack }: RiskScreenProps) {
             Bu işlem yapay zeka analizi nedeniyle bir dakikaya kadar sürebilir.
           </Text>
         </View>
-      ) : (
+      ) : cachedResult ? (
         <ScrollView contentContainerStyle={styles.scroll}>
-          {/* Büyük skor halkası */}
           <View style={styles.scoreSection}>
             <View
               style={[
                 styles.scoreCircle,
-                { borderColor: LEVEL_COLOR[risk.level] },
+                { borderColor: LEVEL_COLOR[cachedResult.level] },
               ]}
             >
-              <Text style={styles.scoreValue}>{risk.score}</Text>
+              <Text style={styles.scoreValue}>{cachedResult.score}</Text>
               <Text style={styles.scoreMax}>/ 100</Text>
             </View>
             <View style={styles.badgeWrap}>
-              <RiskBadge level={risk.level} />
+              <RiskBadge level={cachedResult.level} />
             </View>
           </View>
 
-          {/* Bölge değerlendirme yorumu */}
-          {risk.comment ? (
+          {cachedResult.comment ? (
             <Card style={styles.card}>
               <Text style={styles.cardLabel}>Bölge Değerlendirmesi</Text>
-              <Text style={styles.commentText}>{risk.comment}</Text>
+              <Text style={styles.commentText}>{cachedResult.comment}</Text>
             </Card>
           ) : null}
 
-          {/* Öneriler listesi */}
-          {risk.recommendations && risk.recommendations.length > 0 ? (
+          {cachedResult.recommendations && cachedResult.recommendations.length > 0 ? (
             <Card style={styles.card}>
               <Text style={styles.cardLabel}>Öneriler</Text>
-              {risk.recommendations.map((rec, index) => (
+              {cachedResult.recommendations.map((rec, index) => (
                 <View key={index} style={styles.recItem}>
                   <Text style={styles.recBullet}>•</Text>
                   <Text style={styles.recText}>{rec}</Text>
@@ -104,7 +115,6 @@ export function RiskScreen({ onBack }: RiskScreenProps) {
             </Card>
           ) : null}
 
-          {/* Konum bilgisi kartı */}
           <Card style={styles.card}>
             <Text style={styles.cardLabel}>Konum</Text>
             <Text style={styles.cardValue}>
@@ -116,23 +126,22 @@ export function RiskScreen({ onBack }: RiskScreenProps) {
               </Text>
             )}
             <Text style={styles.analyzedAt}>
-              Analiz: {formatAnalyzedAt(risk.analyzed_at)}
+              Analiz: {formatAnalyzedAt(cachedResult.analyzed_at)}
             </Text>
           </Card>
 
           <PrimaryButton
             label="Yenile"
             variant="secondary"
-            onPress={runAnalysis}
+            onPress={handleRefresh}
             style={styles.refreshButton}
           />
         </ScrollView>
-      )}
+      ) : null}
     </SafeAreaView>
   );
 }
 
-// ISO tarihini okunabilir yerel saate çevirir
 function formatAnalyzedAt(iso: string): string {
   try {
     const date = new Date(iso);
