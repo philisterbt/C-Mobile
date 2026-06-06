@@ -36,7 +36,8 @@
           "locationAlwaysAndWhenInUsePermission": "Afet Yolu konumunuzu kullanarak güvenli tahliye rotası oluşturur.",
           "locationWhenInUsePermission": "Afet Yolu konumunuzu kullanarak güvenli tahliye rotası oluşturur."
         }
-      ]
+      ],
+      "expo-sqlite"
     ]
   }
 }
