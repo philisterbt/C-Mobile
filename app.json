@@ -1,25 +1,42 @@
 {
   "expo": {
-    "name": "afet-yolu-mobile",
-    "slug": "afet-yolu-mobile",
+    "name": "Afet Yolu",
+    "slug": "afet-yolu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.afetyolu.app"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0A0A0A",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "package": "com.afetyolu.app",
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Afet Yolu kamera erişimine ihtiyaç duyuyor."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Afet Yolu konumunuzu kullanarak güvenli tahliye rotası oluşturur.",
+          "locationWhenInUsePermission": "Afet Yolu konumunuzu kullanarak güvenli tahliye rotası oluşturur."
+        }
+      ]
+    ]
   }
 }
