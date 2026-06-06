@@ -1,9 +1,25 @@
-// SQLite yerel veritabanı - mesajlar, sync meta, toplanma alanları ve indirilen bölgeler
+// SQLite yerel veritabanı - mesajlar, sync meta, P2P peer kayıtları
 import * as SQLite from "expo-sqlite";
-import type { LocalMessage, IncomingMessage, DownloadedRegion } from "../types/offline";
+import type {
+  LocalMessage,
+  IncomingMessage,
+  DownloadedRegion,
+  MessageTransport,
+} from "../types/offline";
 import type { AssemblyPoint } from "../types/api";
+import type { P2PPeer } from "../types/p2p";
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
+
+async function migrateSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info(messages)`
+  );
+  const hasTransport = columns.some((c) => c.name === "transport");
+  if (!hasTransport) {
+    await db.execAsync(`ALTER TABLE messages ADD COLUMN transport TEXT`);
+  }
+}
 
 /** Veritabanını açar ve tabloları oluşturur. */
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -19,7 +35,8 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
       sender TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      status TEXT NOT NULL
+      status TEXT NOT NULL,
+      transport TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sync_meta (
@@ -30,6 +47,13 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
     CREATE TABLE IF NOT EXISTS room_meta (
       room_id TEXT PRIMARY KEY,
       last_read_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS peers (
+      peer_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      connected INTEGER NOT NULL DEFAULT 0,
+      last_seen_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS assembly_points (
@@ -49,6 +73,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
     );
   `);
 
+  await migrateSchema(db);
   dbInstance = db;
   return db;
 }
@@ -57,9 +82,17 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 export async function insertMessage(msg: LocalMessage): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(
-    `INSERT INTO messages (client_id, room_id, sender, content, created_at, status)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [msg.client_id, msg.room_id, msg.sender, msg.content, msg.created_at, msg.status]
+    `INSERT INTO messages (client_id, room_id, sender, content, created_at, status, transport)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      msg.client_id,
+      msg.room_id,
+      msg.sender,
+      msg.content,
+      msg.created_at,
+      msg.status,
+      msg.transport ?? null,
+    ]
   );
 }
 
@@ -67,7 +100,7 @@ export async function insertMessage(msg: LocalMessage): Promise<void> {
 export async function getMessagesByRoom(roomId: string): Promise<LocalMessage[]> {
   const db = await getDatabase();
   return db.getAllAsync<LocalMessage>(
-    `SELECT client_id, room_id, sender, content, created_at, status
+    `SELECT client_id, room_id, sender, content, created_at, status, transport
      FROM messages WHERE room_id = ? ORDER BY created_at ASC`,
     [roomId]
   );
@@ -77,31 +110,67 @@ export async function getMessagesByRoom(roomId: string): Promise<LocalMessage[]>
 export async function getPendingMessages(roomId: string): Promise<LocalMessage[]> {
   const db = await getDatabase();
   return db.getAllAsync<LocalMessage>(
-    `SELECT client_id, room_id, sender, content, created_at, status
+    `SELECT client_id, room_id, sender, content, created_at, status, transport
      FROM messages WHERE room_id = ? AND status = 'pending' ORDER BY created_at ASC`,
     [roomId]
   );
 }
 
-/** Sunucudan gelen mesajı ekler veya günceller. */
-export async function upsertIncomingMessage(msg: IncomingMessage): Promise<void> {
+/** Sunucudan veya P2P'den gelen mesajı ekler (client_id ile tekilleştirilir). */
+export async function upsertIncomingMessage(
+  msg: IncomingMessage,
+  transport: MessageTransport = "sync"
+): Promise<boolean> {
   const db = await getDatabase();
   const clientId =
     msg.client_id ?? `srv_${msg.room_id}_${msg.created_at}_${msg.sender}`;
 
+  const existing = await db.getFirstAsync<{ client_id: string }>(
+    `SELECT client_id FROM messages WHERE client_id = ?`,
+    [clientId]
+  );
+  if (existing) return false;
+
   await db.runAsync(
-    `INSERT OR REPLACE INTO messages (client_id, room_id, sender, content, created_at, status)
-     VALUES (?, ?, ?, ?, ?, 'sent')`,
-    [clientId, msg.room_id, msg.sender, msg.content, msg.created_at]
+    `INSERT INTO messages (client_id, room_id, sender, content, created_at, status, transport)
+     VALUES (?, ?, ?, ?, ?, 'sent', ?)`,
+    [clientId, msg.room_id, msg.sender, msg.content, msg.created_at, transport]
+  );
+  return true;
+}
+
+/** Mesajı sunucuya iletildi olarak işaretle. */
+export async function markSent(clientId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE messages
+     SET status = 'sent',
+         transport = CASE
+           WHEN transport = 'p2p' THEN 'both'
+           WHEN transport IS NULL THEN 'sync'
+           ELSE transport
+         END
+     WHERE client_id = ?`,
+    [clientId]
   );
 }
 
-/** Mesajı gönderildi olarak işaretle. */
-export async function markSent(clientId: string): Promise<void> {
+/** Mesajı P2P ile iletildi olarak işaretle. */
+export async function markP2PDelivered(
+  clientId: string,
+  transport: MessageTransport = "p2p"
+): Promise<void> {
   const db = await getDatabase();
-  await db.runAsync(`UPDATE messages SET status = 'sent' WHERE client_id = ?`, [
-    clientId,
-  ]);
+  await db.runAsync(
+    `UPDATE messages
+     SET status = 'p2p_delivered',
+         transport = CASE
+           WHEN transport IS NULL OR transport = 'p2p' THEN ?
+           ELSE 'both'
+         END
+     WHERE client_id = ?`,
+    [transport, clientId]
+  );
 }
 
 /** Mesajı başarısız olarak işaretle. */
@@ -164,7 +233,7 @@ export async function getUnreadCount(
 export async function getLastMessage(roomId: string): Promise<LocalMessage | null> {
   const db = await getDatabase();
   return db.getFirstAsync<LocalMessage>(
-    `SELECT client_id, room_id, sender, content, created_at, status
+    `SELECT client_id, room_id, sender, content, created_at, status, transport
      FROM messages WHERE room_id = ? ORDER BY created_at DESC LIMIT 1`,
     [roomId]
   );
@@ -177,6 +246,60 @@ export async function getTotalPendingCount(): Promise<number> {
     `SELECT COUNT(*) as count FROM messages WHERE status = 'pending'`
   );
   return row?.count ?? 0;
+}
+
+/** P2P peer kaydını günceller. */
+export async function upsertPeer(peer: P2PPeer): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO peers (peer_id, name, connected, last_seen_at)
+     VALUES (?, ?, ?, ?)`,
+    [peer.peerId, peer.name, peer.connected ? 1 : 0, new Date().toISOString()]
+  );
+}
+
+/** Bağlı peer'ları getirir. */
+export async function getConnectedPeers(): Promise<P2PPeer[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    peer_id: string;
+    name: string;
+    connected: number;
+  }>(`SELECT peer_id, name, connected FROM peers WHERE connected = 1 ORDER BY name ASC`);
+
+  return rows.map((r) => ({
+    peerId: r.peer_id,
+    name: r.name,
+    connected: r.connected === 1,
+  }));
+}
+
+/** Keşfedilen tüm peer'ları getirir. */
+export async function getAllPeers(): Promise<P2PPeer[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    peer_id: string;
+    name: string;
+    connected: number;
+  }>(`SELECT peer_id, name, connected FROM peers ORDER BY connected DESC, name ASC`);
+
+  return rows.map((r) => ({
+    peerId: r.peer_id,
+    name: r.name,
+    connected: r.connected === 1,
+  }));
+}
+
+/** Peer bağlantı durumunu günceller. */
+export async function setPeerConnected(
+  peerId: string,
+  connected: boolean
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync(
+    `UPDATE peers SET connected = ?, last_seen_at = ? WHERE peer_id = ?`,
+    [connected ? 1 : 0, new Date().toISOString(), peerId]
+  );
 }
 
 /** Offline bundle toplanma alanlarını kaydeder. */

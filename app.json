@@ -37,6 +37,13 @@
           "locationWhenInUsePermission": "Afet Yolu konumunuzu kullanarak güvenli tahliye rotası oluşturur."
         }
       ],
+      [
+        "./plugins/withAfetP2p.js",
+        {
+          "localNetworkUsagePermissionText": "Afet Yolu, internetsiz mesajlaşma için yakındaki cihazları yerel ağ ve Bluetooth üzerinden keşfeder.",
+          "bluetoothUsagePermissionText": "Afet Yolu, yakındaki cihazlarla internetsiz mesajlaşmak için Bluetooth kullanır."
+        }
+      ],
       "expo-sqlite"
     ]
   }

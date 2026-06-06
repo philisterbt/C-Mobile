@@ -1,5 +1,5 @@
-// Mesajlar sekmesi - tek sohbet ekranı
-import React from "react";
+// Mesajlar sekmesi - P2P yakın mesajlaşma + offline sync
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   FlatList,
@@ -11,29 +11,69 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/colors";
 import { Spacing } from "../../constants/theme";
-import { CHAT_TITLE } from "../../constants/rooms";
+import { getRoomLabel } from "../../constants/rooms";
 import { Header } from "../../components/Header";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ChatInput } from "../../components/ChatInput";
 import { OfflineBanner } from "../../components/OfflineBanner";
+import { RoomPicker } from "../../components/RoomPicker";
+import { NearbyPeersPanel } from "../../components/NearbyPeersPanel";
+import { QuickTemplates } from "../../components/QuickTemplates";
 import { useOfflineMessages } from "../../hooks/useOfflineMessages";
+import { useP2PMessaging } from "../../hooks/useP2PMessaging";
 
 export function MessagesScreen() {
+  const [peersExpanded, setPeersExpanded] = useState(false);
+
   const {
     messages,
     loading,
     pendingCount,
     isConnected,
+    roomId,
+    setRoomId,
     refresh,
     sendMessage,
     sync,
+    relayPending,
   } = useOfflineMessages();
+
+  const onP2PUpdate = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+
+  const { peers, connectedCount, isNearbyActive } = useP2PMessaging(onP2PUpdate);
+
+  useEffect(() => {
+    if (connectedCount > 0) {
+      relayPending();
+    }
+  }, [connectedCount, relayPending]);
+
+  const handleSend = async (text: string) => {
+    await sendMessage(text);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.BACKGROUND} />
-      <Header title={CHAT_TITLE} />
-      <OfflineBanner pendingCount={pendingCount} isConnected={isConnected} />
+      <Header title={`Mesajlar · ${getRoomLabel(roomId)}`} />
+
+      <OfflineBanner
+        pendingCount={pendingCount}
+        isConnected={isConnected}
+        p2pActive={isNearbyActive}
+        connectedPeerCount={connectedCount}
+      />
+
+      <RoomPicker activeRoomId={roomId} onChange={setRoomId} />
+
+      <NearbyPeersPanel
+        peers={peers}
+        connectedCount={connectedCount}
+        expanded={peersExpanded}
+        onToggle={() => setPeersExpanded((v) => !v)}
+      />
 
       {loading && messages.length === 0 ? (
         <View style={styles.center}>
@@ -60,7 +100,8 @@ export function MessagesScreen() {
         />
       )}
 
-      <ChatInput onSend={sendMessage} />
+      <QuickTemplates onSelect={handleSend} />
+      <ChatInput onSend={handleSend} />
     </SafeAreaView>
   );
 }

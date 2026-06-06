@@ -12,8 +12,16 @@ interface MessageBubbleProps {
 // Mesaj durumu ikonları
 const STATUS_ICON: Record<MessageStatus, string> = {
   pending: "⏳",
+  p2p_delivered: "📶",
   sent: "✓",
   failed: "✗",
+};
+
+const STATUS_LABEL: Record<MessageStatus, string> = {
+  pending: "Bekliyor",
+  p2p_delivered: "P2P",
+  sent: "İletildi",
+  failed: "Başarısız",
 };
 
 export function MessageBubble({ message }: MessageBubbleProps) {
@@ -32,7 +40,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </Text>
           {isOwn && (
             <Text style={[styles.status, isOwn && styles.timeOwn]}>
-              {" "}{STATUS_ICON[message.status]}
+              {" "}{STATUS_ICON[message.status]} {STATUS_LABEL[message.status]}
             </Text>
           )}
         </View>

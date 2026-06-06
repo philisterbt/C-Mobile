@@ -1,18 +1,20 @@
-// Offline mesajlaşma hook'u - tek sohbet, SQLite + backend sync
+// Offline + P2P mesajlaşma hook'u - oda bazlı sohbet
 import { useState, useEffect, useCallback } from "react";
-import { CHAT_ROOM_ID } from "../constants/rooms";
+import { DEFAULT_ROOM_ID, ROOM_OPTIONS } from "../constants/rooms";
 import {
   getMessagesByRoom,
   getTotalPendingCount,
   markRoomRead,
   getDatabase,
+  getPendingMessages,
 } from "../services/localDB";
 import { getCurrentUserName } from "../services/deviceId";
 import { sendLocalMessage } from "../services/messagingService";
-import { syncChat } from "../services/messageSync";
+import { syncAllRooms } from "../services/messageSync";
+import { relayPendingToPeers } from "../services/p2pService";
 import { isOnline } from "../utils/network";
 import type { Message } from "../types/messaging";
-import type { LocalMessage } from "../types/offline";
+import type { LocalMessage, RoomId } from "../types/offline";
 
 function toUIMessage(m: LocalMessage, currentUser: string): Message {
   return {
@@ -22,6 +24,7 @@ function toUIMessage(m: LocalMessage, currentUser: string): Message {
     sender: m.sender,
     createdAt: m.created_at,
     status: m.status,
+    transport: m.transport ?? null,
     isOwn: m.sender === currentUser,
   };
 }
@@ -31,12 +34,16 @@ interface UseOfflineMessagesResult {
   loading: boolean;
   pendingCount: number;
   isConnected: boolean;
+  roomId: RoomId;
+  setRoomId: (roomId: RoomId) => void;
   refresh: () => Promise<void>;
   sendMessage: (text: string) => Promise<void>;
   sync: () => Promise<void>;
+  relayPending: () => Promise<void>;
 }
 
 export function useOfflineMessages(): UseOfflineMessagesResult {
+  const [roomId, setRoomIdState] = useState<RoomId>(DEFAULT_ROOM_ID);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
@@ -50,47 +57,69 @@ export function useOfflineMessages(): UseOfflineMessagesResult {
       const online = await isOnline();
       setIsConnected(online);
 
-      const rows = await getMessagesByRoom(CHAT_ROOM_ID);
+      const rows = await getMessagesByRoom(roomId);
       setMessages(rows.map((m) => toUIMessage(m, currentUser)));
       setPendingCount(await getTotalPendingCount());
     } finally {
       setLoading(false);
     }
+  }, [roomId]);
+
+  const setRoomId = useCallback((nextRoom: RoomId) => {
+    setRoomIdState(nextRoom);
   }, []);
 
   useEffect(() => {
-    markRoomRead(CHAT_ROOM_ID);
+    markRoomRead(roomId);
     refresh();
     isOnline().then((online) => {
       if (online) {
-        syncChat().then(refresh).catch(() => {});
+        syncAllRooms(ROOM_OPTIONS.map((r) => r.id))
+          .then(refresh)
+          .catch(() => {});
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [roomId, refresh]);
 
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim()) return;
-      await sendLocalMessage(text);
+      await sendLocalMessage(text, roomId);
       await refresh();
     },
-    [refresh]
+    [roomId, refresh]
   );
 
   const sync = useCallback(async () => {
     if (!(await isOnline())) return;
-    await syncChat();
+    await syncAllRooms(ROOM_OPTIONS.map((r) => r.id));
     await refresh();
   }, [refresh]);
+
+  const relayPending = useCallback(async () => {
+    const pending = await getPendingMessages(roomId);
+    if (pending.length === 0) return;
+    await relayPendingToPeers(
+      roomId,
+      pending.map((m) => ({
+        client_id: m.client_id,
+        content: m.content,
+        created_at: m.created_at,
+      }))
+    );
+    await refresh();
+  }, [roomId, refresh]);
 
   return {
     messages,
     loading,
     pendingCount,
     isConnected,
+    roomId,
+    setRoomId,
     refresh,
     sendMessage,
     sync,
+    relayPending,
   };
 }

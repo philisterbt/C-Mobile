@@ -1,4 +1,4 @@
-// Çevrimdışı mod bilgi bandı - bağlantı ve bekleyen mesaj durumu
+// Çevrimdışı / P2P bilgi bandı
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Colors } from "../constants/colors";
@@ -7,20 +7,45 @@ import { Spacing, FontSize } from "../constants/theme";
 interface OfflineBannerProps {
   pendingCount: number;
   isConnected?: boolean;
+  p2pActive?: boolean;
+  connectedPeerCount?: number;
 }
 
-export function OfflineBanner({ pendingCount, isConnected = true }: OfflineBannerProps) {
+export function OfflineBanner({
+  pendingCount,
+  isConnected = true,
+  p2pActive = false,
+  connectedPeerCount = 0,
+}: OfflineBannerProps) {
+  const showP2P = p2pActive && !isConnected;
+
   return (
-    <View style={[styles.banner, !isConnected && styles.bannerOffline]}>
-      <Text style={styles.icon}>{isConnected ? "📡" : "📴"}</Text>
+    <View
+      style={[
+        styles.banner,
+        showP2P && styles.bannerP2P,
+        !isConnected && !showP2P && styles.bannerOffline,
+      ]}
+    >
+      <Text style={styles.icon}>
+        {showP2P ? "📴" : isConnected ? "📡" : "📴"}
+      </Text>
       <View style={styles.textWrap}>
         <Text style={styles.title}>
-          {isConnected ? "Çevrimiçi" : "Çevrimdışı Mod"}
+          {showP2P
+            ? "Yakın mesajlaşma aktif"
+            : isConnected
+              ? "Çevrimiçi"
+              : "Çevrimdışı Mod"}
         </Text>
         <Text style={styles.subtitle}>
-          {isConnected
-            ? "Mesajlar cihazda saklanır ve sunucuya senkronize edilir"
-            : "İnternet yok — mesajlar yerelde bekletiliyor"}
+          {showP2P
+            ? `${connectedPeerCount} yakın cihazla internetsiz mesajlaşma`
+            : isConnected
+              ? "Mesajlar cihazda saklanır; P2P ve sunucu sync desteklenir"
+              : p2pActive
+                ? `İnternet yok — P2P aktif (${connectedPeerCount} cihaz)`
+                : "İnternet yok — mesajlar yerelde bekletiliyor"}
           {pendingCount > 0 ? ` · ${pendingCount} bekliyor` : ""}
         </Text>
       </View>
@@ -37,6 +62,10 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.SAFE + "44",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
+  },
+  bannerP2P: {
+    backgroundColor: Colors.PRIMARY + "22",
+    borderBottomColor: Colors.PRIMARY + "44",
   },
   bannerOffline: {
     backgroundColor: Colors.WARNING + "22",

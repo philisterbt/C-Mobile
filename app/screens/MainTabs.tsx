@@ -6,6 +6,7 @@ import { TabBar, type TabKey } from "../../components/TabBar";
 import { useNetworkSync } from "../../hooks/useNetworkSync";
 import { useLocation } from "../../hooks/useLocation";
 import { useRiskAnalysis } from "../../hooks/useRiskAnalysis";
+import { startP2PService } from "../../services/p2pService";
 import { MapScreen } from "./MapScreen";
 import { RouteScreen } from "./RouteScreen";
 import { AssemblyScreen } from "./AssemblyScreen";
@@ -22,6 +23,11 @@ export function MainTabs() {
 
   // İnternet gelince mesajları otomatik senkronize et
   useNetworkSync(useCallback(() => setSyncTick((n) => n + 1), []));
+
+  // Uygulama açılınca yakın cihaz keşfi (P2P) başlat
+  useEffect(() => {
+    startP2PService().catch(() => {});
+  }, []);
 
   // Risk sekmesi açıldığında analiz et; aynı konumda önbellekten göster
   useEffect(() => {

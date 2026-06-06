@@ -6,13 +6,16 @@ import type { AssemblyPoint } from "./api";
 export type RoomId = "genel" | "aile" | "mahalle" | "acil";
 
 // SQLite'da saklanan yerel mesaj
+export type MessageTransport = "p2p" | "sync" | "both";
+
 export interface LocalMessage {
   client_id: string;
   room_id: RoomId;
   sender: string;
   content: string;
   created_at: string;
-  status: "pending" | "sent" | "failed";
+  status: "pending" | "sent" | "failed" | "p2p_delivered";
+  transport?: MessageTransport | null;
 }
 
 // Sunucudan gelen mesaj

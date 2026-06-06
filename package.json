@@ -5,6 +5,7 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.4.1",
+    "afet-p2p": "file:./modules/afet-p2p",
     "axios": "^1.17.0",
     "expo": "~54.0.0",
     "expo-camera": "~17.0.10",
@@ -24,7 +25,8 @@
     "typescript": "~5.9.2"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --go --offline",
+    "start:lan": "expo start --go --lan",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

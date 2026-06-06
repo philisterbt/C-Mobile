@@ -1,7 +1,7 @@
 // Mesaj senkronizasyon servisi - backend /api/v1/messages/sync ile haberleşir
 import { api } from "./api";
 import { getOrCreateDeviceId } from "./deviceId";
-import { CHAT_ROOM_ID } from "../constants/rooms";
+import { SYNC_ROOM_ID } from "../constants/rooms";
 import {
   getPendingMessages,
   getLastSync,
@@ -9,9 +9,10 @@ import {
   upsertIncomingMessage,
   markSent,
 } from "./localDB";
+import type { RoomId } from "../types/offline";
 
-/** Tek sohbeti sunucu ile senkronize eder. */
-export async function syncMessages(roomId: string): Promise<void> {
+/** Belirtilen odayı sunucu ile senkronize eder. */
+export async function syncMessages(roomId: RoomId): Promise<void> {
   const deviceId = await getOrCreateDeviceId();
   const pending = await getPendingMessages(roomId);
   const lastSync = await getLastSync(roomId);
@@ -29,7 +30,7 @@ export async function syncMessages(roomId: string): Promise<void> {
   });
 
   for (const msg of data.incoming) {
-    await upsertIncomingMessage(msg);
+    await upsertIncomingMessage(msg, "sync");
   }
 
   for (const id of data.acked_client_ids) {
@@ -39,7 +40,18 @@ export async function syncMessages(roomId: string): Promise<void> {
   await setLastSync(roomId, data.server_time);
 }
 
-/** Varsayılan sohbet odasını senkronize eder. */
+/** Varsayılan backend sohbet odasını senkronize eder. */
 export async function syncChat(): Promise<void> {
-  await syncMessages(CHAT_ROOM_ID);
+  await syncMessages(SYNC_ROOM_ID);
+}
+
+/** Tüm aktif odaları senkronize eder (internet gelince). */
+export async function syncAllRooms(roomIds: RoomId[]): Promise<void> {
+  for (const roomId of roomIds) {
+    try {
+      await syncMessages(roomId);
+    } catch {
+      // Oda bazlı hata diğerlerini engellemesin
+    }
+  }
 }

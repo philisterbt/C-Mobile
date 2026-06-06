@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["AfetP2pModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.afetp2p.AfetP2pModule"]
+  }
+}
