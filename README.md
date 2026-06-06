@@ -4,6 +4,8 @@ Deprem ve afet senaryolarında güvenli tahliye, toplanma alanları, risk analiz
 
 **Backend:** `https://c-backend-2enq.onrender.com`
 
+**Sunum:** [Cursor — Sunum (PDF)](https://drive.google.com/file/d/1hh129bdWI2xCgIQu8wtWo7O_QAUjdmMM/view?usp=sharing)
+
 ## Özellikler
 
 | Sekme | Açıklama |
